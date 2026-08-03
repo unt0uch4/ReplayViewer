@@ -155,12 +155,8 @@ public int RV_HandleSelectZoneMenu(Menu menu, MenuAction action, int param1, int
 }
 
 // Build the zone list menu now when we have the number of stages and bonuses.
-public void RV_CreateZoneListMenu(int response_handle)
+public void RV_CreateZoneListMenu(bool linear, int num_stages, int num_bonuses)
 {
-    int num_stages = Net_MapInfoGetNumStages(response_handle);
-    int num_bonuses = Net_MapInfoGetNumBonuses(response_handle);
-    bool linear = Net_MapInfoGetLinear(response_handle);
-
     rv_zone_list_menu = CreateMenu(RV_HandleSelectZoneMenu);
     SetMenuTitle(rv_zone_list_menu, "Select zone");
     SetMenuExitBackButton(rv_zone_list_menu, true);
@@ -259,12 +255,9 @@ public int RV_HandleSelectReplayMenu(Menu menu, MenuAction action, int param1, i
 }
 
 // Build the replay selection menu for a given zone.
-public void RV_CreateNewReplayListMenu(int response_handle)
+public void RV_CreateNewReplayListMenu(JSONArray items, int user_id, int zone_id)
 {
-    int user_id = Net_ReplayListGetUserId(response_handle);
-    // int angle_type = Net_ReplayListGetAngleType(response_handle);
-    int zone_id = Net_ReplayListGetZoneId(response_handle);
-    int num_replays = Net_ReplayListGetNum(response_handle);
+    int num_replays = items.Length;
 
     char zone_title[32];
     Net_CategorizeZoneId(zone_id, zone_title, sizeof(zone_title));
@@ -284,10 +277,14 @@ public void RV_CreateNewReplayListMenu(int response_handle)
 
     for (int i = 0; i < num_replays; i++)
     {
-        Net_ReplayListGetName(response_handle, i, name_display, sizeof(name_display));
-        Net_ReplayListGetTime(response_handle, i, time_display, sizeof(time_display));
-        Net_ReplayListGetDate(response_handle, i, date_display, sizeof(date_display));
-        Net_ReplayListGetId(response_handle, i, replay_id, sizeof(replay_id));
+        JSONObject item = view_as<JSONObject>(items.Get(i));
+
+        item.GetString("player_name", name_display, sizeof(name_display));
+        item.GetString("time_str", time_display, sizeof(time_display));
+        item.GetString("date_str", date_display, sizeof(date_display));
+        item.GetString("file", replay_id, sizeof(replay_id));
+
+        delete item;
 
         Format(full_row_display, sizeof(full_row_display), "[%s] %s (%s)", time_display, name_display, date_display);
 

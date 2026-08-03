@@ -6,6 +6,7 @@
 #include <sdkhooks>
 #include <sdktools>
 #include <menus>
+#include <ripext>
 
 #pragma semicolon 1
 #pragma newdecls required

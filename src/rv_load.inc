@@ -3,7 +3,12 @@
 #endif
 #define LOAD_INCLUDED
 
-#define RV_MAGIC 0x02 // Identifier or version.
+#define RV_MAGIC_V2 0x02 // Identifier or version.
+#define RV_MAGIC_V3 0x03 // Self-describing header with larger frames; we use the v2 prefix of each frame.
+
+// v3+ headers declare their own frame size in cells; RVFrame is the 10-cell v2 prefix of it.
+#define RV_FRAME_CELLS_V2 10
+#define RV_MAX_FRAME_CELLS 64
 
 bool RV_LoadFileStream(char[] path, RVStream stream)
 {
@@ -20,11 +25,33 @@ bool RV_LoadFileStream(char[] path, RVStream stream)
     RVHeader header;
     ReadFile(file, header, sizeof(header), 4);
 
-    if (header.magic != RV_MAGIC)
+    if (header.magic != RV_MAGIC_V2 && header.magic != RV_MAGIC_V3)
     {
-        PrintToChatAll("Could not load stream \"%s\", wrong version or wrong file type (%d), expected %d", path, header.magic, RV_MAGIC);
+        PrintToChatAll("Could not load stream \"%s\", wrong version or wrong file type (%d), expected %d or %d", path, header.magic, RV_MAGIC_V2, RV_MAGIC_V3);
         delete file;
         return false;
+    }
+
+    int frame_cells = RV_FRAME_CELLS_V2;
+
+    if (header.magic == RV_MAGIC_V3)
+    {
+        // v3 headers carry the frame size and an extension block (client settings snapshot) to skip.
+        int ext_cells;
+        ReadFileCell(file, frame_cells, 4);
+        ReadFileCell(file, ext_cells, 4);
+
+        if (frame_cells < RV_FRAME_CELLS_V2 || frame_cells > RV_MAX_FRAME_CELLS)
+        {
+            PrintToChatAll("Could not load stream \"%s\", unsupported frame size (%d cells)", path, frame_cells);
+            delete file;
+            return false;
+        }
+
+        if (ext_cells > 0)
+        {
+            FileSeek(file, ext_cells * 4, SEEK_CUR);
+        }
     }
 
     stream.bookmarks = CreateArray(sizeof(RVBookmark));
@@ -41,14 +68,29 @@ bool RV_LoadFileStream(char[] path, RVStream stream)
     stream.frames = CreateArray(sizeof(RVFrame));
     ResizeArray(stream.frames, header.num_frames);
 
+    // The header frame count can slightly exceed what is stored, so stop on a short read.
+    // Only the first RV_FRAME_CELLS_V2 cells of each frame are used; the rest is newer telemetry.
+
+    int frame_scratch[RV_MAX_FRAME_CELLS];
+    int frames_read = 0;
+
     for (int i = 0; i < header.num_frames; i++)
     {
-        RVFrame frame;
-        ReadFile(file, frame, sizeof(frame), 4);
-        SetArrayArray(stream.frames, i, frame);
+        if (ReadFile(file, frame_scratch, frame_cells, 4) != frame_cells)
+        {
+            break;
+        }
+
+        SetArrayArray(stream.frames, i, frame_scratch, sizeof(RVFrame));
+        frames_read++;
     }
 
-    stream.num_frames = header.num_frames;
+    if (frames_read != header.num_frames)
+    {
+        ResizeArray(stream.frames, frames_read);
+    }
+
+    stream.num_frames = frames_read;
     stream.num_bookmarks = header.num_bookmarks;
     stream.start_offset = 0;
     stream.team = header.team;
@@ -193,27 +235,25 @@ public void RV_StopLoad()
 }
 
 // Store data from the replay listing.
-public void RV_ProcessDownloadedListing(int response_handle)
+public void RV_ProcessDownloadedListing(JSONArray items, int zone_id, int angle_type)
 {
-    int angle_type = Net_ReplayListGetAngleType(response_handle);
-    int zone_id = Net_ReplayListGetZoneId(response_handle);
-    int num_replays = Net_ReplayListGetNum(response_handle);
-
-    char listing_id[RV_REPLAY_ID_SIZE];
+    int num_replays = items.Length;
 
     for (int i = 0; i < num_replays; i++)
     {
-        Net_ReplayListGetId(response_handle, i, listing_id, sizeof(listing_id));
+        JSONObject item = view_as<JSONObject>(items.Get(i));
 
         RVReplayListing listing;
-        strcopy(listing.id, sizeof(listing.id), listing_id);
-        Net_ReplayListGetName(response_handle, i, listing.name, sizeof(listing.name));
-        Net_ReplayListGetTime(response_handle, i, listing.time, sizeof(listing.time));
-        Net_ReplayListGetDate(response_handle, i, listing.date, sizeof(listing.date));
+        item.GetString("file", listing.id, sizeof(listing.id));
+        item.GetString("player_name", listing.name, sizeof(listing.name));
+        item.GetString("time_str", listing.time, sizeof(listing.time));
+        item.GetString("date_str", listing.date, sizeof(listing.date));
         listing.angle_type = angle_type;
         listing.zone_id = zone_id;
 
-        SetTrieArray(rv_replay_listings, listing_id, listing, sizeof(listing));
+        delete item;
+
+        SetTrieArray(rv_replay_listings, listing.id, listing, sizeof(listing));
     }
 }
 
@@ -258,30 +298,6 @@ public bool RV_LoadStreamSpawnBot(char[] stream_id)
     return res;
 }
 
-// A replay selected in the zone menu has been downloaded.
-// This saves the replay to file for future cache, and then loads that file and spawns a bot with that stream.
-public void RV_ProcessDownloadedReplay(int response_handle)
-{
-    char stream_id[RV_REPLAY_ID_SIZE];
-    Net_ReplayDownloadGetId(response_handle, stream_id, sizeof(stream_id));
-
-    PrintToServer("Downloaded %s", stream_id);
-
-    // Save the stream to file and then load that.
-    // This makes it a lot easier because the code for loading a file already exists.
-    // Reading from memory is just super annoying to do in SourcePawn, and it would be stupid
-    // to have duplicate code for reading the same format from different mediums.
-
-    // Maybe create new directory for this map.
-
-    char dir_path[PLATFORM_MAX_PATH];
-    BuildPath(Path_SM, dir_path, sizeof(dir_path), "%s/replays/%s", RV_ROOT_PATH, rv_cur_map);
-    RV_MaybeCreateDir(dir_path);
-
-    char save_path[PLATFORM_MAX_PATH];
-    RV_GetReplayFilePath(stream_id, save_path, sizeof(save_path));
-
-    Net_ReplayDownloadWriteToFile(response_handle, save_path);
-
-    RV_LoadStreamSpawnBot(stream_id);
-}
+// Downloaded replays are saved to file by the network layer (rv_net_callbacks.inc:
+// ripext downloads the compressed file, SMbz2 inflates it to the cache path), then
+// loaded from disk here via RV_LoadStreamSpawnBot like any offline file.
