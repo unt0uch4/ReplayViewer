@@ -3,27 +3,32 @@
 #endif
 #define NET_CALLBACKS_INCLUDED
 
-// Network requests and their callbacks (ripext + SMbz2).
+// Network requests and their callbacks (ripext).
 // Kept separate from rv_net.inc because these read state declared in rv_priv.inc.
+//
+// Every request carries the requesting client as the callback value (0 = the quiet
+// prefetch at map start): errors are shown to the person using the menu, not sprayed
+// at map start, and a rejected token prints the sign-in link (Net_PrintRequestFailure).
 
 // Get information about the current map, such as the zones.
-public void Net_DownloadMapInfo()
+// When the answer arrives the zone menu is built, and shown to user_id if given.
+public void Net_DownloadMapInfo(int user_id)
 {
     if (!net_config_ok)
     {
-        PrintToChatAll("Replay viewer is not configured, see data/replay_viewer/api.txt and auth.txt");
+        Net_PrintConfigError(user_id);
         return;
     }
 
     HTTPRequest request = Net_NewRequest("replay-viewer/maps/%s", rv_cur_map);
-    request.Get(Net_OnMapInfo);
+    request.Get(Net_OnMapInfo, user_id);
 }
 
-public void Net_OnMapInfo(HTTPResponse response, any value)
+public void Net_OnMapInfo(HTTPResponse response, any user_id)
 {
     if (response.Status != HTTPStatus_OK || !Net_HasJsonBody(response))
     {
-        PrintToChatAll("Could not download map information");
+        Net_PrintRequestFailure(user_id, response.Status, "map information");
         return;
     }
 
@@ -34,6 +39,11 @@ public void Net_OnMapInfo(HTTPResponse response, any value)
     int num_bonuses = data.GetInt("bonus_count");
 
     RV_CreateZoneListMenu(linear, num_stages, num_bonuses);
+
+    if (Net_UserValid(user_id))
+    {
+        DisplayMenu(rv_zone_list_menu, user_id, MENU_TIME_FOREVER);
+    }
 }
 
 // Download a list of possible replays for a given zone in a leaderboard.
@@ -44,7 +54,7 @@ public void Net_DownloadReplayList(int user_id, int zone_id, int angle_type)
 {
     if (!net_config_ok)
     {
-        PrintToChatAll("Replay viewer is not configured, see data/replay_viewer/api.txt and auth.txt");
+        Net_PrintConfigError(user_id);
         return;
     }
 
@@ -62,7 +72,7 @@ public void Net_OnReplayList(HTTPResponse response, any value)
 
     if (response.Status != HTTPStatus_OK || !Net_HasJsonBody(response))
     {
-        PrintToChatAll("Could not download replay list");
+        Net_PrintRequestFailure(user_id, response.Status, "the replay list");
         return;
     }
 
@@ -71,7 +81,7 @@ public void Net_OnReplayList(HTTPResponse response, any value)
 
     if (items == null)
     {
-        PrintToChatAll("Could not download replay list");
+        Net_PrintRequestFailure(user_id, response.Status, "the replay list");
         return;
     }
 
@@ -89,7 +99,7 @@ public void Net_DownloadReplay(int user_id, char[] id)
 {
     if (!net_config_ok)
     {
-        PrintToChatAll("Replay viewer is not configured, see data/replay_viewer/api.txt and auth.txt");
+        Net_PrintConfigError(user_id);
         return;
     }
 
@@ -103,6 +113,7 @@ public void Net_DownloadReplay(int user_id, char[] id)
     RV_GetReplayFilePath(id, save_path, sizeof(save_path));
 
     DataPack pack = new DataPack();
+    pack.WriteCell(user_id);
     pack.WriteString(id);
 
     HTTPRequest request = Net_NewRequest("replay-viewer/replays/%s", id);
@@ -114,6 +125,8 @@ public void Net_OnReplayDownload(HTTPStatus status, any value)
     DataPack pack = view_as<DataPack>(value);
     pack.Reset();
 
+    int user_id = pack.ReadCell();
+
     char id[RV_REPLAY_ID_SIZE];
     pack.ReadString(id, sizeof(id));
     delete pack;
@@ -124,7 +137,7 @@ public void Net_OnReplayDownload(HTTPStatus status, any value)
     if (status != HTTPStatus_OK)
     {
         DeleteFile(save_path); // ripext leaves a partial or error-body file behind.
-        PrintToChatAll("Could not download replay");
+        Net_PrintRequestFailure(user_id, status, "the replay");
         return;
     }
 

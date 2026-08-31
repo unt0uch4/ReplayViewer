@@ -62,7 +62,15 @@ public int RV_HandlePlaybackMenu(Menu menu, MenuAction action, int param1, int p
 
             case RV_MENU_LIST_ZONES:
             {
-                DisplayMenu(rv_zone_list_menu, param1, MENU_TIME_FOREVER);
+                if (rv_zone_list_menu != null)
+                {
+                    DisplayMenu(rv_zone_list_menu, param1, MENU_TIME_FOREVER);
+                }
+
+                else
+                {
+                    RV_RequestZoneListMenu(param1);
+                }
             }
         }
     }
@@ -94,11 +102,26 @@ public void RV_StartMenus()
 {
     RV_CreateMainMenu();
 
-    // Download map info immediately.
-    // This will call into Net_MapInfoDownloadReceived or Net_MapInfoDownloadFailed in rv_net_callbacks.inc.
-    Net_DownloadMapInfo();
+    // Prefetch the map info so the zone menu is usually ready by the time it is opened.
+    // Quiet on failure (user 0): problems are reported when someone uses the menu, and
+    // RV_RequestZoneListMenu retries the whole chain on demand.
+    Net_DownloadMapInfo(0);
 
     rv_loaded_streams = CreateTrie();
+}
+
+// The zone menu is not built yet: the config was bad or the map info download failed.
+// Reload the config and retry on demand, so fixed files work without a plugin reload.
+public void RV_RequestZoneListMenu(int client)
+{
+    if (!net_config_ok && !Net_LoadConfig())
+    {
+        Net_PrintConfigError(client);
+        return;
+    }
+
+    PrintToChat(client, "Downloading map information, please wait");
+    Net_DownloadMapInfo(client);
 }
 
 // Called on map end.
@@ -157,6 +180,8 @@ public int RV_HandleSelectZoneMenu(Menu menu, MenuAction action, int param1, int
 // Build the zone list menu now when we have the number of stages and bonuses.
 public void RV_CreateZoneListMenu(bool linear, int num_stages, int num_bonuses)
 {
+    delete rv_zone_list_menu; // The on-demand retry can build this more than once.
+
     rv_zone_list_menu = CreateMenu(RV_HandleSelectZoneMenu);
     SetMenuTitle(rv_zone_list_menu, "Select zone");
     SetMenuExitBackButton(rv_zone_list_menu, true);

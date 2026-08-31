@@ -27,6 +27,10 @@ char net_api_game[32];
 char net_auth_token[192];
 bool net_config_ok;
 
+// Why the config is not ok, shown in chat when someone actually uses the menu
+// (map start only logs — see Net_LoadConfig).
+char net_config_error[192];
+
 // Index 0 will return stage 1.
 stock int Net_GetStageZone(int idx)
 {
@@ -60,8 +64,16 @@ stock void Net_CategorizeZoneId(int zone_id, char[] dest, int dest_size)
     }
 }
 
-// Read the server settings. Called on map start so a replaced token or URL is
-// picked up without reloading the plugin.
+// Remember why the config failed. Logged once here; shown in chat later, when
+// someone actually uses the menu (Net_PrintConfigError).
+static void Net_ConfigFailed(const char[] format, any ...)
+{
+    VFormat(net_config_error, sizeof(net_config_error), format, 2);
+    LogError("%s", net_config_error);
+}
+
+// Read the server settings. Called on map start (quiet in chat) and again on
+// demand from the menu, so fixed files work without reloading the plugin.
 public bool Net_LoadConfig()
 {
     net_config_ok = false;
@@ -73,7 +85,7 @@ public bool Net_LoadConfig()
 
     if (file == null)
     {
-        LogError("Could not open api config file (%s)", path);
+        Net_ConfigFailed("Missing api.txt (addons/sourcemod/data/replay_viewer/api.txt); line 1 must be the API base URL");
         return false;
     }
 
@@ -82,7 +94,7 @@ public bool Net_LoadConfig()
     if (!file.ReadLine(line, sizeof(line)))
     {
         delete file;
-        LogError("api.txt is empty; line 1 must be the API base URL");
+        Net_ConfigFailed("api.txt is empty; line 1 must be the API base URL");
         return false;
     }
 
@@ -98,7 +110,7 @@ public bool Net_LoadConfig()
     if (strncmp(line, "http://", 7) != 0 && strncmp(line, "https://", 8) != 0)
     {
         delete file;
-        LogError("api.txt line 1 must be a base URL starting with http:// or https://");
+        Net_ConfigFailed("api.txt line 1 must be a base URL starting with http:// or https://");
         return false;
     }
 
@@ -124,15 +136,13 @@ public bool Net_LoadConfig()
 
     if (file == null)
     {
-        LogError("Could not open auth file (%s)", path);
+        Net_ConfigFailed("Missing auth.txt (addons/sourcemod/data/replay_viewer/auth.txt); sign in at %s/v1/replay-viewer/auth/login to get a token", net_api_base);
         return false;
     }
 
     if (!file.ReadLine(line, sizeof(line)))
     {
-        delete file;
-        LogError("auth.txt is empty; line 1 must be the access token");
-        return false;
+        line[0] = 0;
     }
 
     delete file;
@@ -141,7 +151,7 @@ public bool Net_LoadConfig()
 
     if (line[0] == 0)
     {
-        LogError("auth.txt is empty; line 1 must be the access token");
+        Net_ConfigFailed("auth.txt is empty; sign in at %s/v1/replay-viewer/auth/login and paste the token as line 1", net_api_base);
         return false;
     }
 
@@ -150,6 +160,41 @@ public bool Net_LoadConfig()
     net_config_ok = true;
 
     return true;
+}
+
+// True when this is a real, connected client we can print chat to. The prefetch
+// at map start passes 0, which stays silent.
+stock bool Net_UserValid(int user_id)
+{
+    return user_id > 0 && user_id <= MaxClients && IsClientInGame(user_id);
+}
+
+// Show the stored config problem to whoever is using the menu.
+stock void Net_PrintConfigError(int user_id)
+{
+    if (Net_UserValid(user_id))
+    {
+        PrintToChat(user_id, "%s", net_config_error);
+    }
+}
+
+// A request failed. A rejected token gets the sign-in link (the base URL is where
+// tokens are minted); anything else gets the short reason.
+stock void Net_PrintRequestFailure(int user_id, HTTPStatus status, const char[] what)
+{
+    if (!Net_UserValid(user_id))
+    {
+        return;
+    }
+
+    if (status == HTTPStatus_Unauthorized || status == HTTPStatus_Forbidden)
+    {
+        PrintToChat(user_id, "Your access token was rejected or expired.");
+        PrintToChat(user_id, "Sign in at %s/v1/replay-viewer/auth/login and paste the new token into data/replay_viewer/auth.txt", net_api_base);
+        return;
+    }
+
+    PrintToChat(user_id, "Could not download %s (HTTP %d)", what, status);
 }
 
 // Create a request for a path under /v1/<game>/, with auth attached.
