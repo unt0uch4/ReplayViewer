@@ -12,16 +12,22 @@
 
 // Get information about the current map, such as the zones.
 // When the answer arrives the zone menu is built, and shown to user_id if given.
-public void Net_DownloadMapInfo(int user_id)
+// Returns true if the request was sent (false = config problem, reported to user_id).
+public bool Net_DownloadMapInfo(int user_id)
 {
-    if (!net_config_ok)
+    // Re-read the config files on every request: tokens are short-lived, and a
+    // replaced auth.txt (the fix for a rejected one) must be picked up on the
+    // next menu click, without a plugin reload.
+    if (!Net_LoadConfig())
     {
         Net_PrintConfigError(user_id);
-        return;
+        return false;
     }
 
     HTTPRequest request = Net_NewRequest("replay-viewer/maps/%s", rv_cur_map);
     request.Get(Net_OnMapInfo, user_id);
+
+    return true;
 }
 
 public void Net_OnMapInfo(HTTPResponse response, any user_id)
@@ -50,18 +56,21 @@ public void Net_OnMapInfo(HTTPResponse response, any user_id)
 // See NET_ZONE_MAP, Net_GetStageZone and Net_GetBonusZone to get a zone id from a logical stage number.
 // See NET_ANGLE_TYPE constants for angled leaderboards.
 // The user id is used to open the menu for that client when the list arrives.
-public void Net_DownloadReplayList(int user_id, int zone_id, int angle_type)
+// Returns true if the request was sent (false = config problem, reported to user_id).
+public bool Net_DownloadReplayList(int user_id, int zone_id, int angle_type)
 {
-    if (!net_config_ok)
+    if (!Net_LoadConfig())
     {
         Net_PrintConfigError(user_id);
-        return;
+        return false;
     }
 
     HTTPRequest request = Net_NewRequest("replay-viewer/maps/%s/zones/%d/replays?finish_type=%d", rv_cur_map, zone_id, angle_type);
 
     // User id, zone id and angle type packed into the one callback value cell.
     request.Get(Net_OnReplayList, user_id | (zone_id << 8) | (angle_type << 16));
+
+    return true;
 }
 
 public void Net_OnReplayList(HTTPResponse response, any value)
@@ -95,12 +104,13 @@ public void Net_OnReplayList(HTTPResponse response, any value)
 // The replay id comes from the zone replay list.
 // The server sends the file already decompressed, straight into the cache location,
 // and a bot is spawned with the stream when everything worked.
-public void Net_DownloadReplay(int user_id, char[] id)
+// Returns true if the request was sent (false = config problem, reported to user_id).
+public bool Net_DownloadReplay(int user_id, char[] id)
 {
-    if (!net_config_ok)
+    if (!Net_LoadConfig())
     {
         Net_PrintConfigError(user_id);
-        return;
+        return false;
     }
 
     // Maybe create new directory for this map, ripext will not create it for us.
@@ -118,6 +128,8 @@ public void Net_DownloadReplay(int user_id, char[] id)
 
     HTTPRequest request = Net_NewRequest("replay-viewer/replays/%s", id);
     request.DownloadFile(save_path, Net_OnReplayDownload, pack);
+
+    return true;
 }
 
 public void Net_OnReplayDownload(HTTPStatus status, any value)

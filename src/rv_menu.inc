@@ -111,17 +111,13 @@ public void RV_StartMenus()
 }
 
 // The zone menu is not built yet: the config was bad or the map info download failed.
-// Reload the config and retry on demand, so fixed files work without a plugin reload.
+// Retry on demand (the request re-reads the config files itself).
 public void RV_RequestZoneListMenu(int client)
 {
-    if (!net_config_ok && !Net_LoadConfig())
+    if (Net_DownloadMapInfo(client))
     {
-        Net_PrintConfigError(client);
-        return;
+        PrintToChat(client, "Downloading map information, please wait");
     }
-
-    PrintToChat(client, "Downloading map information, please wait");
-    Net_DownloadMapInfo(client);
 }
 
 // Called on map end.
@@ -149,11 +145,12 @@ public int RV_HandleSelectZoneMenu(Menu menu, MenuAction action, int param1, int
         int zone_id = StringToInt(tokens[1]);
 
         // Download the replay list if we have to.
-        // This will call into Net_ReplayListDownloadReceived or Net_ReplayListDownloadFailed in rv_net_callbacks.inc.
         if (rv_zone_menus[zone_id] == null)
         {
-            Net_DownloadReplayList(param1, zone_id, angle_type);
-            PrintToChatAll("Downloading replay list, please wait");
+            if (Net_DownloadReplayList(param1, zone_id, angle_type))
+            {
+                PrintToChat(param1, "Downloading replay list, please wait");
+            }
         }
 
         else
@@ -230,11 +227,12 @@ public int RV_HandleSelectReplayMenu(Menu menu, MenuAction action, int param1, i
         RV_GetReplayFilePath(replay_id, load_path, sizeof(load_path));
 
         // Download the replay if we have to.
-        // This will call into Net_ReplayDownloadReceived or Net_ReplayDownloadFailed in rv_net_callbacks.inc.
         if (!FileExists(load_path))
         {
-            Net_DownloadReplay(param1, replay_id);
-            PrintToChatAll("Downloading replay");
+            if (Net_DownloadReplay(param1, replay_id))
+            {
+                PrintToChat(param1, "Downloading replay");
+            }
         }
 
         else

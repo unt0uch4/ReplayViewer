@@ -25,7 +25,6 @@
 char net_api_base[192];
 char net_api_game[32];
 char net_auth_token[192];
-bool net_config_ok;
 
 // Why the config is not ok, shown in chat when someone actually uses the menu
 // (map start only logs — see Net_LoadConfig).
@@ -72,12 +71,10 @@ static void Net_ConfigFailed(const char[] format, any ...)
     LogError("%s", net_config_error);
 }
 
-// Read the server settings. Called on map start (quiet in chat) and again on
-// demand from the menu, so fixed files work without reloading the plugin.
+// Read the server settings. Called at the start of every request, so replaced
+// files (a fresh token especially) work without reloading the plugin.
 public bool Net_LoadConfig()
 {
-    net_config_ok = false;
-
     char path[PLATFORM_MAX_PATH];
     BuildPath(Path_SM, path, sizeof(path), "data/replay_viewer/api.txt");
 
@@ -156,8 +153,6 @@ public bool Net_LoadConfig()
     }
 
     strcopy(net_auth_token, sizeof(net_auth_token), line);
-
-    net_config_ok = true;
 
     return true;
 }
