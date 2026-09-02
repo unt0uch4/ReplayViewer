@@ -65,7 +65,7 @@ public bool Net_DownloadReplayList(int user_id, int zone_id, int angle_type)
         return false;
     }
 
-    HTTPRequest request = Net_NewRequest("replay-viewer/maps/%s/zones/%d/replays?finish_type=%d", rv_cur_map, zone_id, angle_type);
+    HTTPRequest request = Net_NewRequest("replay-viewer/maps/%s/zones/%d/replays?finish_type=%d&sort=%s", rv_cur_map, zone_id, angle_type, rv_sort_recent ? "recent" : "time");
 
     // User id, zone id and angle type packed into the one callback value cell.
     request.Get(Net_OnReplayList, user_id | (zone_id << 8) | (angle_type << 16));

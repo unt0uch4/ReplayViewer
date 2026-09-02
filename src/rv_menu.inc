@@ -72,6 +72,11 @@ public int RV_HandlePlaybackMenu(Menu menu, MenuAction action, int param1, int p
                     RV_RequestZoneListMenu(param1);
                 }
             }
+
+            case RV_MENU_TOGGLE_SORT:
+            {
+                RV_ToggleSort(param1);
+            }
         }
     }
 
@@ -86,15 +91,49 @@ public int RV_HandlePlaybackMenu(Menu menu, MenuAction action, int param1, int p
     return 0;
 }
 
+// The current list ordering as menu/title text.
+public void RV_GetSortLabel(char[] dest, int dest_size)
+{
+    strcopy(dest, dest_size, rv_sort_recent ? "Most recent" : "Fastest times");
+}
+
 public void RV_CreateMainMenu()
 {
+    delete rv_main_menu; // Rebuilt by the sort toggle so its label stays current.
+
     rv_main_menu = CreateMenu(RV_HandlePlaybackMenu);
     SetMenuTitle(rv_main_menu, "Replay Viewer");
+
+    char sort_display[64];
+    RV_GetSortLabel(sort_display, sizeof(sort_display));
+    Format(sort_display, sizeof(sort_display), "Sort: %s", sort_display);
 
     RV_MenuAddEnumItem(rv_main_menu, RV_MENU_START_PLAYBACK, "Start playback");
     RV_MenuAddEnumItem(rv_main_menu, RV_MENU_STOP_PLAYBACK, "Stop playback");
     RV_MenuAddEnumItem(rv_main_menu, RV_MENU_RESET_PLAYBACK, "Reset playback");
     RV_MenuAddEnumItem(rv_main_menu, RV_MENU_LIST_ZONES, "List replays");
+    RV_MenuAddEnumItem(rv_main_menu, RV_MENU_TOGGLE_SORT, sort_display);
+}
+
+// Flip the list ordering. Cached zone menus were built under the old ordering,
+// so they are dropped and refetched on the next selection.
+public void RV_ToggleSort(int client)
+{
+    rv_sort_recent = !rv_sort_recent;
+
+    for (int i = 0; i < NET_ZONES_MAX; i++)
+    {
+        delete rv_zone_menus[i];
+        rv_zone_menus[i] = null;
+    }
+
+    RV_CreateMainMenu();
+
+    char sort_display[64];
+    RV_GetSortLabel(sort_display, sizeof(sort_display));
+    PrintToChat(client, "Sorting replays by: %s", sort_display);
+
+    DisplayMenu(rv_main_menu, client, MENU_TIME_FOREVER);
 }
 
 // Called on map start.
@@ -285,8 +324,11 @@ public void RV_CreateNewReplayListMenu(JSONArray items, int user_id, int zone_id
     char zone_title[32];
     Net_CategorizeZoneId(zone_id, zone_title, sizeof(zone_title));
 
+    char sort_display[64];
+    RV_GetSortLabel(sort_display, sizeof(sort_display));
+
     char menu_title[128];
-    Format(menu_title, sizeof(menu_title), "%s (%d replays)", zone_title, num_replays);
+    Format(menu_title, sizeof(menu_title), "%s (%d replays, %s)", zone_title, num_replays, sort_display);
 
     Menu menu = CreateMenu(RV_HandleSelectReplayMenu, MENU_ACTIONS_DEFAULT | MenuAction_DrawItem);
     SetMenuTitle(menu, menu_title);

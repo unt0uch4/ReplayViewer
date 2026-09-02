@@ -85,6 +85,7 @@ enum RVMenuId
     RV_MENU_STOP_PLAYBACK,
     RV_MENU_RESET_PLAYBACK,
     RV_MENU_LIST_ZONES,
+    RV_MENU_TOGGLE_SORT,
 }
 
 // Information about a replay.
@@ -107,6 +108,10 @@ int rv_num_bots; // How many bots are actually placed in rv_bots.
 int rv_bot_maps[MAXPLAYERS + 1]; // Remaps from client ids to bot indexes.
 
 char rv_cur_map[128];
+
+// Replay list ordering: false = fastest times first, true = most recent first.
+// Toggled from the main menu; kept across maps as a session preference.
+bool rv_sort_recent;
 
 // Downloaded replay listings for a zone.
 // These are created on demand and reused, meaning that new requests are not made for existing ones.
